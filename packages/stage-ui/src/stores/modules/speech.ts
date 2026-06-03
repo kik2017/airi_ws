@@ -238,34 +238,28 @@ export const useSpeechStore = defineStore('speech', () => {
     ensureActiveSpeechModel()
   })
 
-  // Resolve the active voice object from the persisted voice id.
-  //
-  // Prefer full metadata from the provider's voice listing when present. When
-  // the id is not in the listing — because the provider returns no catalog
-  // (e.g. openai-compatible) or its listing failed (e.g. an ElevenLabs key
-  // missing the `voices_read` permission) — synthesize a minimal voice from the
-  // id alone. The runtime reads `activeSpeechVoice.value?.id`, so without this a
-  // manually entered / persisted id could not speak after a reload.
   watch([activeSpeechVoiceId, availableVoices], ([voiceId, voices]) => {
-    if (!voiceId)
-      return
-
-    const foundVoice = voices[activeSpeechProvider.value]?.find(voice => voice.id === voiceId)
-    if (foundVoice) {
-      activeSpeechVoice.value = foundVoice
-      return
-    }
-
-    // Avoid needless reactivity churn when the synthesized voice already matches.
-    if (!activeSpeechVoice.value || activeSpeechVoice.value.id !== voiceId) {
-      activeSpeechVoice.value = {
-        id: voiceId,
-        name: voiceId,
-        description: voiceId,
-        previewURL: '',
-        languages: [{ code: 'en', title: 'English' }],
-        provider: activeSpeechProvider.value,
-        gender: 'neutral',
+    if (voiceId) {
+      // For OpenAI Compatible, create a custom voice object (no voices available from API)
+      if (activeSpeechProvider.value === 'openai-compatible-audio-speech') {
+        // Always update to match voiceId (in case it changed)
+        activeSpeechVoice.value = {
+          id: voiceId,
+          name: voiceId,
+          description: voiceId,
+          previewURL: '',
+          languages: [{ code: 'en', title: 'English' }],
+          provider: activeSpeechProvider.value,
+          gender: 'neutral',
+        }
+      }
+      else {
+        // For other providers, find voice in available voices
+        const foundVoice = voices[activeSpeechProvider.value]?.find(voice => voice.id === voiceId)
+        // Only update if we found a voice, or if activeSpeechVoice is not set
+        if (foundVoice || !activeSpeechVoice.value) {
+          activeSpeechVoice.value = foundVoice
+        }
       }
     }
   }, {

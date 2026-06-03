@@ -1,6 +1,5 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { nextTick } from 'vue'
 
 import { OFFICIAL_SPEECH_PROVIDER_ID, OFFICIAL_SPEECH_STREAMING_PROVIDER_ID } from '../../libs/providers/providers/official'
 import { useProvidersStore } from '../providers'
@@ -78,75 +77,5 @@ describe('speech store helpers', () => {
     expect(speechStore.activeSpeechModel).toBe('microsoft/v1')
     expect(speechStore.activeSpeechVoiceId).toBe('')
     expect(speechStore.activeSpeechVoice).toBeUndefined()
-  })
-})
-
-describe('speech store custom voice resolution', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-  })
-
-  // ROOT CAUSE:
-  //
-  // When an ElevenLabs API key lacks the `voices_read` permission, the voice
-  // listing fails (401), so `availableVoices[provider]` stays empty. The
-  // resolver watcher previously synthesized a voice object from the id ONLY for
-  // `openai-compatible-audio-speech`; for every other provider it looked the id
-  // up in the (empty) listing and set `activeSpeechVoice` to `undefined`. Since
-  // the runtime speaks via `activeSpeechVoice.value?.id`, a manually entered /
-  // persisted id could not produce audio after a reload.
-  //
-  // We fixed this by synthesizing a minimal voice from the id for ANY provider
-  // when the listing does not contain it.
-  /**
-   * @example
-   * speechStore.activeSpeechVoiceId = 'my-custom-voice'
-   * // -> activeSpeechVoice resolves to { id: 'my-custom-voice', provider: 'elevenlabs', ... }
-   */
-  it('synthesizes a voice object from a persisted id when the listing is unavailable (Issue: ElevenLabs voices_read 401)', async () => {
-    const providersStore = useProvidersStore()
-    const speechStore = useSpeechStore()
-    // Keep the provider-change watcher's voice load offline and deterministic.
-    const meta = providersStore.providerMetadata.elevenlabs
-    if (meta)
-      meta.capabilities.listVoices = vi.fn(async () => [])
-
-    speechStore.activeSpeechProvider = 'elevenlabs'
-    await nextTick()
-
-    speechStore.activeSpeechVoiceId = 'my-custom-voice'
-    await nextTick()
-    await nextTick()
-
-    expect(speechStore.activeSpeechVoiceId).toBe('my-custom-voice')
-    expect(speechStore.activeSpeechVoice?.id).toBe('my-custom-voice')
-    expect(speechStore.activeSpeechVoice?.provider).toBe('elevenlabs')
-  })
-
-  /**
-   * @example
-   * speechStore.availableVoices = { elevenlabs: [{ id: 'rachel', name: 'Rachel', ... }] }
-   * speechStore.activeSpeechVoiceId = 'rachel'
-   * // -> activeSpeechVoice resolves to the full 'Rachel' metadata, not a synthesized stub
-   */
-  it('prefers full voice metadata from the provider listing over a synthesized voice', async () => {
-    const providersStore = useProvidersStore()
-    const speechStore = useSpeechStore()
-    const meta = providersStore.providerMetadata.elevenlabs
-    if (meta)
-      meta.capabilities.listVoices = vi.fn(async () => [])
-
-    speechStore.activeSpeechProvider = 'elevenlabs'
-    await nextTick()
-
-    speechStore.availableVoices = {
-      elevenlabs: [{ id: 'rachel', name: 'Rachel', provider: 'elevenlabs', languages: [] }],
-    }
-    speechStore.activeSpeechVoiceId = 'rachel'
-    await nextTick()
-    await nextTick()
-
-    expect(speechStore.activeSpeechVoice?.id).toBe('rachel')
-    expect(speechStore.activeSpeechVoice?.name).toBe('Rachel')
   })
 })

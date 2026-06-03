@@ -721,12 +721,6 @@ pages:
             no_voices: No voices available
             no_voices_description: No voices were found for this provider
             no_voices_hint: You can enter a custom voice name below.
-            permission_error_title: Can't list voices
-            permission_error_description: >-
-              Your provider API key is missing the permission required to list
-              voices (for ElevenLabs this is voices_read). Voice synthesis does
-              not need it — enter your voice ID manually below and it will be
-              saved.
             pause: Pause
             play_sample: Play Sample
             search_models_placeholder: Search models...
