@@ -92,6 +92,10 @@ const filteredVoices = computed(() => {
 
   const query = searchQuery.value.toLowerCase()
   return props.voices.filter((voice) => {
+    // Search by voice id so a known id can be surfaced even when it is past the
+    // collapsed display limit (the grid only shows a few voices until expanded).
+    const idMatch = voice.id.toLowerCase().includes(query)
+
     // Search in name and description
     const nameMatch = voice.name.toLowerCase().includes(query)
     const descMatch = voice.description && voice.description.toLowerCase().includes(query)
@@ -109,7 +113,7 @@ const filteredVoices = computed(() => {
       lang => lang.name.toLowerCase().includes(query) || lang.code.toLowerCase().includes(query),
     )
 
-    return nameMatch || descMatch || tagMatch || labelMatch || langMatch
+    return idMatch || nameMatch || descMatch || tagMatch || labelMatch || langMatch
   })
 })
 
