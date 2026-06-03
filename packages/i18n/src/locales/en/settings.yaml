@@ -713,8 +713,13 @@ pages:
               loading: Loading model...
               required: Please select a voice
           provider-voice-selection:
+            advanced_title: Advanced
             custom_model_placeholder: Enter custom model name...
             custom_voice_placeholder: Enter custom voice ID...
+            custom_voice_id_label: Custom voice ID
+            custom_voice_id_description: >-
+              Enter a voice ID directly — synthesis only needs the ID, not the
+              voice list.
             description: Select the suitable speech provider
             no_models: No models available
             no_models_description: No models were found for this provider

@@ -14,6 +14,7 @@ import { useAnalytics } from '@proj-airi/stage-ui/composables'
 import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
 import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
 import {
+  Collapsible,
   FieldCheckbox,
   FieldInput,
   FieldRange,
@@ -61,6 +62,14 @@ const isVoicesPermissionError = computed(() => {
     || message.includes('missing the permission')
     || message.includes('401')
 })
+
+// Whether the provider returned a usable voice catalog (mirrors the picker's
+// render condition). When true the grid is shown and the custom voice id lives
+// in a collapsed Advanced section; otherwise the inline manual field is shown.
+const hasUsableVoices = computed(() =>
+  activeSpeechProvider.value !== 'openai-compatible-audio-speech'
+  && (availableVoices.value[activeSpeechProvider.value]?.length ?? 0) > 0,
+)
 const useSSML = ref(false)
 const testText = ref('Hello, my name is AI Assistant')
 const ssmlText = ref('')
@@ -563,6 +572,34 @@ function handleDeleteProvider(providerId: string) {
             />
           </div>
 
+          <!-- Advanced: override with a custom voice id even when a catalog is available -->
+          <Collapsible v-if="hasUsableVoices" w-full class="mt-2">
+            <template #trigger="slotProps">
+              <button
+                transition="all ease-in-out duration-250"
+                w-full flex items-center gap-1.5 outline-none
+                @click="slotProps.setVisible(!slotProps.visible)"
+              >
+                <h2 class="text-sm text-neutral-500 dark:text-neutral-400">
+                  {{ t('settings.pages.modules.speech.sections.section.provider-voice-selection.advanced_title') }}
+                </h2>
+                <div transform transition="transform duration-250" :class="{ 'rotate-180': slotProps.visible }">
+                  <div i-solar:alt-arrow-down-linear />
+                </div>
+              </button>
+            </template>
+            <div mt-2>
+              <FieldInput
+                type="text"
+                :model-value="activeSpeechVoiceId || ''"
+                :label="t('settings.pages.modules.speech.sections.section.provider-voice-selection.custom_voice_id_label')"
+                :description="t('settings.pages.modules.speech.sections.section.provider-voice-selection.custom_voice_id_description')"
+                :placeholder="t('settings.pages.modules.speech.sections.section.provider-voice-selection.custom_voice_placeholder')"
+                @update:model-value="updateCustomVoiceName"
+              />
+            </div>
+          </Collapsible>
+
           <!-- Manual voice input when no voices are available or for OpenAI Compatible -->
           <div
             v-if="activeSpeechProvider === 'openai-compatible-audio-speech' || !availableVoices[activeSpeechProvider] || availableVoices[activeSpeechProvider].length === 0"
@@ -571,9 +608,9 @@ function handleDeleteProvider(providerId: string) {
             <FieldInput
               type="text"
               :model-value="activeSpeechVoiceId || ''"
-              label="Voice Name"
-              description="Enter the voice name for your custom voice"
-              placeholder="Enter voice name (e.g., 'alloy', 'echo')"
+              :label="t('settings.pages.modules.speech.sections.section.provider-voice-selection.custom_voice_id_label')"
+              :description="t('settings.pages.modules.speech.sections.section.provider-voice-selection.custom_voice_id_description')"
+              :placeholder="t('settings.pages.modules.speech.sections.section.provider-voice-selection.custom_voice_placeholder')"
               @update:model-value="updateCustomVoiceName"
             />
 
