@@ -22,7 +22,7 @@ import {
 } from '@proj-airi/ui'
 import { generateSpeech } from '@xsai/generate-speech'
 import { storeToRefs } from 'pinia'
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 
@@ -50,6 +50,17 @@ const {
 const { trackProviderClick } = useAnalytics()
 
 const voiceSearchQuery = ref('')
+
+// A failed voice listing is recoverable: synthesis only needs a voice id, not
+// the listing permission. Detect the ElevenLabs `voices_read` 401 (and similar
+// permission denials) so we can guide the user to enter a voice id manually
+// instead of showing a dead-end error.
+const isVoicesPermissionError = computed(() => {
+  const message = (speechProviderError.value ?? '').toLowerCase()
+  return message.includes('voices_read')
+    || message.includes('missing the permission')
+    || message.includes('401')
+})
 const useSSML = ref(false)
 const testText = ref('Hello, my name is AI Assistant')
 const ssmlText = ref('')
@@ -226,20 +237,13 @@ onUnmounted(() => {
 })
 
 function updateCustomVoiceName(value: string | undefined) {
-  if (!value) {
+  // Persist the custom voice id (mirrors updateCustomModelName) so a manually
+  // entered ElevenLabs/custom voice survives navigation, reload, and is saved
+  // into the AIRI card (see airi-card.ts voice_id). The speech store rebuilds
+  // the matching activeSpeechVoice object from this id.
+  activeSpeechVoiceId.value = value || ''
+  if (!value)
     activeSpeechVoice.value = undefined
-    return
-  }
-
-  activeSpeechVoice.value = {
-    id: value,
-    name: value,
-    description: value,
-    previewURL: value,
-    languages: [{ code: 'en', title: 'English' }],
-    provider: activeSpeechProvider.value,
-    gender: 'male',
-  }
 }
 
 function updateCustomModelName(value: string | undefined) {
@@ -501,12 +505,30 @@ function handleDeleteProvider(providerId: string) {
             />
           </div>
 
-          <ErrorContainer
-            v-else-if="speechProviderError"
-            class="mb-2"
-            title="Error loading voices"
-            :error="speechProviderError"
-          />
+          <template v-else-if="speechProviderError">
+            <!-- Permission denials (e.g. an ElevenLabs key without voices_read)
+                 are recoverable via manual entry below, so guide instead of
+                 surfacing a raw error. -->
+            <Alert
+              v-if="isVoicesPermissionError"
+              type="warning"
+              icon="i-solar:info-circle-line-duotone"
+              class="mb-2"
+            >
+              <template #title>
+                {{ t('settings.pages.modules.speech.sections.section.provider-voice-selection.permission_error_title') }}
+              </template>
+              <template #content>
+                {{ t('settings.pages.modules.speech.sections.section.provider-voice-selection.permission_error_description') }}
+              </template>
+            </Alert>
+            <ErrorContainer
+              v-else
+              class="mb-2"
+              title="Error loading voices"
+              :error="speechProviderError"
+            />
+          </template>
 
           <!-- No voices available -->
           <Alert
