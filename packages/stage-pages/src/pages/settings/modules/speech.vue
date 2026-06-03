@@ -226,20 +226,13 @@ onUnmounted(() => {
 })
 
 function updateCustomVoiceName(value: string | undefined) {
-  if (!value) {
+  // Persist the custom voice id (mirrors updateCustomModelName) so a manually
+  // entered ElevenLabs/custom voice survives navigation, reload, and is saved
+  // into the AIRI card (see airi-card.ts voice_id). The speech store rebuilds
+  // the matching activeSpeechVoice object from this id.
+  activeSpeechVoiceId.value = value || ''
+  if (!value)
     activeSpeechVoice.value = undefined
-    return
-  }
-
-  activeSpeechVoice.value = {
-    id: value,
-    name: value,
-    description: value,
-    previewURL: value,
-    languages: [{ code: 'en', title: 'English' }],
-    provider: activeSpeechProvider.value,
-    gender: 'male',
-  }
 }
 
 function updateCustomModelName(value: string | undefined) {
