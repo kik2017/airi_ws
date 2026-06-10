@@ -11,6 +11,7 @@ import WebSocket from 'ws'
 import { useLogger } from '@guiiai/logg'
 import { context as otelContext, SpanStatusCode, trace } from '@opentelemetry/api'
 
+import { ApiError } from '../../utils/error'
 import { nanoid } from '../../utils/id'
 import {
   AIRI_ATTR_BILLING_FLUX_CONSUMED,
@@ -49,6 +50,14 @@ export interface AudioSpeechSessionState {
   handleClientClose: () => void
 }
 
+export type StreamingTtsTrigger = 'auto' | 'manual'
+export type StreamingTtsSource = 'audio.speech.ws' | 'chat_auto_tts' | 'manual_preview' | 'settings_test'
+
+export interface AudioSpeechSessionAnalytics {
+  trigger?: StreamingTtsTrigger
+  source?: StreamingTtsSource
+}
+
 /**
  * Creates the per-connection streaming speech state machine.
  *
@@ -63,9 +72,14 @@ export interface AudioSpeechSessionState {
  * Returns:
  * - A connection-scoped state object with no global peer registry.
  */
-export function createSessionState(userId: string, opts: AudioSpeechWsHandlersOptions): AudioSpeechSessionState {
+export function createSessionState(
+  userId: string,
+  opts: AudioSpeechWsHandlersOptions,
+  analyticsInput: AudioSpeechSessionAnalytics = {},
+): AudioSpeechSessionState {
   const requestId = nanoid()
   const startedAt = Date.now()
+  const analytics = normalizeAnalytics(analyticsInput)
   const span = tracer.startSpan('llm.gateway.tts.stream', {
     attributes: {
       [AIRI_ATTR_GEN_AI_OPERATION_KIND]: 'text_to_speech_stream',
@@ -91,6 +105,18 @@ export function createSessionState(userId: string, opts: AudioSpeechWsHandlersOp
   }
 
   async function dialUpstream() {
+    void opts.productEventService.track({
+      userId,
+      feature: 'tts',
+      action: 'speech_requested',
+      status: 'started',
+      source: analytics.source,
+      model: modelLabel,
+      metadata: {
+        trigger: analytics.trigger,
+      },
+    })
+
     let unspeech: Awaited<ReturnType<AudioSpeechWsHandlersOptions['configKV']['getOptional']>>
     try {
       unspeech = await opts.configKV.getOptional('UNSPEECH_UPSTREAM')
@@ -111,10 +137,6 @@ export function createSessionState(userId: string, opts: AudioSpeechWsHandlersOp
     // afford the worst-case session.
     try {
       const flux = await opts.fluxService.getFlux(userId)
-      if (flux.flux <= 0) {
-        closeWithError(1008, 'insufficient_flux')
-        return
-      }
       await opts.ttsMeter.assertCanAfford(userId, STREAMING_PREFLIGHT_CHARS_ESTIMATE, flux.flux)
     }
     catch (err) {
@@ -122,7 +144,10 @@ export function createSessionState(userId: string, opts: AudioSpeechWsHandlersOp
       // assertCanAfford throws PaymentRequiredError (402) — translate to ws
       // policy-violation close. The client can read the close code/reason to
       // surface a 'top up' prompt.
-      closeWithError(1008, 'insufficient_flux')
+      if (isPaymentRequiredError(err))
+        closeWithBlockedPreflight(1008, 'insufficient_flux')
+      else
+        closeWithError(1011, 'flux_preflight_failed')
       return
     }
 
@@ -191,6 +216,19 @@ export function createSessionState(userId: string, opts: AudioSpeechWsHandlersOp
       log.withError(err).withFields({ userId }).warn('upstream ws error')
       span.recordException(err)
       span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
+      void opts.productEventService.track({
+        userId,
+        feature: 'tts',
+        action: 'speech_failed',
+        status: 'failed',
+        source: analytics.source,
+        model: modelLabel,
+        reason: 'upstream_error',
+        metadata: {
+          duration_ms: Date.now() - startedAt,
+          trigger: analytics.trigger,
+        },
+      })
       try {
         clientWs?.send(JSON.stringify({
           event: 'error',
@@ -383,6 +421,21 @@ export function createSessionState(userId: string, opts: AudioSpeechWsHandlersOp
       log.withError(err).warn('failed to write request log for streaming tts')
     }
 
+    void opts.productEventService.track({
+      userId,
+      feature: 'tts',
+      action: 'speech_succeeded',
+      status: 'succeeded',
+      source: analytics.source,
+      model: modelLabel,
+      metadata: {
+        input_chars: units,
+        duration_ms: durationMs,
+        flux_consumed: fluxConsumed,
+        trigger: analytics.trigger,
+      },
+    })
+
     finalize()
   }
 
@@ -405,6 +458,53 @@ export function createSessionState(userId: string, opts: AudioSpeechWsHandlersOp
     if (closed)
       return
     span.setStatus({ code: SpanStatusCode.ERROR, message: reason })
+    void opts.productEventService.track({
+      userId,
+      feature: 'tts',
+      action: 'speech_failed',
+      status: 'failed',
+      source: analytics.source,
+      model: modelLabel,
+      reason,
+      metadata: {
+        close_code: code,
+        duration_ms: Date.now() - startedAt,
+        trigger: analytics.trigger,
+      },
+    })
+    if (clientWs) {
+      try {
+        clientWs.send(JSON.stringify({ event: 'error', code: reason, message: reason }))
+      }
+      catch {}
+      try {
+        clientWs.close(code, reason)
+      }
+      catch {}
+    }
+    closed = true
+    span.end()
+  }
+
+  function closeWithBlockedPreflight(code: number, reason: string) {
+    if (closed)
+      return
+    void opts.productEventService.track({
+      userId,
+      feature: 'tts',
+      action: 'speech_blocked',
+      status: 'blocked',
+      source: analytics.source,
+      model: modelLabel,
+      reason: 'insufficient_balance',
+      metadata: {
+        balance_state: 'insufficient',
+        billing_units: STREAMING_PREFLIGHT_CHARS_ESTIMATE,
+        close_code: code,
+        duration_ms: Date.now() - startedAt,
+        trigger: analytics.trigger,
+      },
+    })
     if (clientWs) {
       try {
         clientWs.send(JSON.stringify({ event: 'error', code: reason, message: reason }))
@@ -425,4 +525,36 @@ export function createSessionState(userId: string, opts: AudioSpeechWsHandlersOp
     handleClientMessage,
     handleClientClose,
   }
+}
+
+function normalizeAnalytics(input: AudioSpeechSessionAnalytics): Required<AudioSpeechSessionAnalytics> {
+  return {
+    trigger: normalizeTrigger(input.trigger),
+    source: normalizeSource(input.source),
+  }
+}
+
+function normalizeTrigger(trigger: AudioSpeechSessionAnalytics['trigger']): StreamingTtsTrigger {
+  return trigger === 'auto' ? 'auto' : 'manual'
+}
+
+function normalizeSource(source: AudioSpeechSessionAnalytics['source']): StreamingTtsSource {
+  switch (source) {
+    case 'audio.speech.ws':
+    case 'chat_auto_tts':
+    case 'manual_preview':
+    case 'settings_test':
+      return source
+    default:
+      return 'audio.speech.ws'
+  }
+}
+
+function isPaymentRequiredError(err: unknown): boolean {
+  if (err instanceof ApiError)
+    return err.statusCode === 402
+  return typeof err === 'object'
+    && err != null
+    && 'statusCode' in err
+    && (err as { statusCode?: unknown }).statusCode === 402
 }

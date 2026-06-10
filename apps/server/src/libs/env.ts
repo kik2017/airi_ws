@@ -80,6 +80,16 @@ const EnvSchema = object({
 
   API_SERVER_URL: optional(string(), 'http://localhost:3000'),
 
+  // Standalone auth UI base URL. The server keeps `/auth/*` as the historical
+  // entrypoint and redirects those requests here after ui-server-auth moved out
+  // of the server image.
+  AUTH_UI_URL: optional(string(), 'https://accounts.airi.build/ui'),
+
+  // Standalone admin UI base URL. The server keeps `/admin/*` as the historical
+  // entrypoint and redirects those requests here after ui-admin moved out of
+  // the server image.
+  ADMIN_UI_URL: optional(string(), 'https://admin.airi.build'),
+
   // Canonical user-facing web app origin. Used as the Stripe redirect base
   // (success_url / cancel_url / portal return_url) when a request has no trusted
   // browser origin — notably the Electron desktop renderer, which loads from
@@ -130,11 +140,6 @@ const EnvSchema = object({
 
   STRIPE_SECRET_KEY: optional(string()),
   STRIPE_WEBHOOK_SECRET: optional(string()),
-
-  // PostHog server-side analytics. Optional — when unset the client is null
-  // and `captureSafe(...)` is a no-op so webhooks still complete.
-  POSTHOG_API_KEY: optional(string(), ''),
-  POSTHOG_HOST: optional(string(), 'https://us.i.posthog.com'),
 
   // LLM/TTS gateway is fully internalised by the in-process router; provider
   // baseURLs live per-upstream inside LLM_ROUTER_CONFIG, and the default chat /

@@ -262,6 +262,8 @@ pages:
         listFailed: Could not load connected accounts.
         unlinkFailed: Could not unlink this account.
         linkFailed: Could not start the link flow.
+        accountAlreadyLinkedToDifferentUser: This OAuth account is already linked to another AIRI account. Choose a different provider account, or unlink it from the other AIRI account first.
+        oauthCallbackFailed: We could not connect this OAuth account. Try again or choose another provider account.
         lastAccount: This is your only sign-in method. Set a password first before unlinking it.
     security:
       tab: Security
@@ -712,6 +714,12 @@ pages:
             select-voice:
               loading: Loading model...
               required: Please select a voice
+          voice-pack:
+            description: Select a curated voice for the active character
+            empty: No Voice Packs available
+            error: Error loading Voice Packs
+            loading: Loading Voice Packs...
+            title: Voice Pack
           provider-voice-selection:
             advanced_title: Advanced
             custom_model_placeholder: Enter custom model name...

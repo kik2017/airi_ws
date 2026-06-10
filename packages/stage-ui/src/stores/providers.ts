@@ -24,7 +24,7 @@ import type { ProviderOnboardingField } from '../libs/providers/types'
 import type { AliyunRealtimeSpeechExtraOptions } from './providers/aliyun/stream-transcription'
 
 import { errorMessageFrom } from '@moeru/std'
-import { isStageTamagotchi, isUrl } from '@proj-airi/stage-shared'
+import { isCustomProvidersDisabled, isStageTamagotchi, isUrl } from '@proj-airi/stage-shared'
 import { getCachedWebGPUCapabilities, isWebGPUSupported } from '@proj-airi/stage-shared/webgpu'
 import { computedAsync, useIntervalFn, useLocalStorage } from '@vueuse/core'
 import {
@@ -283,6 +283,7 @@ export const useProvidersStore = defineStore('providers', () => {
       descriptionKey: 'settings.pages.providers.provider.speech-noop.description',
       description: 'No speech output.',
       icon: 'i-solar:volume-cross-bold-duotone',
+      requiresCredentials: false,
       defaultOptions: () => ({}),
       createProvider: async () => ({
         speech: () => ({
@@ -857,6 +858,7 @@ export const useProvidersStore = defineStore('providers', () => {
       descriptionKey: 'settings.pages.providers.provider.browser-web-speech-api.description',
       description: 'Browser-native speech recognition. No API keys.',
       icon: 'i-solar:microphone-bold-duotone',
+      requiresCredentials: false,
       defaultOptions: () => ({
         language: 'en-US',
         continuous: true,
@@ -2033,6 +2035,7 @@ export const useProvidersStore = defineStore('providers', () => {
       descriptionKey: 'settings.pages.providers.provider.kokoro-local.description',
       description: 'Local text-to-speech using Kokoro-82M.',
       icon: 'i-lobe-icons:speaker',
+      requiresCredentials: false,
 
       defaultOptions: () => {
         const capabilities = getCachedWebGPUCapabilities()
@@ -2279,7 +2282,7 @@ export const useProvidersStore = defineStore('providers', () => {
   // const validatedCredentials = ref<Record<string, string>>({})
   const providerRuntimeState = ref<Record<string, ProviderRuntimeState>>({})
   const providerValidationInFlight = new Map<string, Promise<boolean>>()
-  const providerRevalidationLoops = new Map<string, { resume: () => void }>()
+  const providerRevalidationLoops = new Map<string, { pause: () => void, resume: () => void }>()
 
   // Server-driven availability overrides for providers whose visibility can
   // only be decided at runtime from the backend (e.g. the streaming TTS
@@ -2403,9 +2406,33 @@ export const useProvidersStore = defineStore('providers', () => {
   // Initialize all providers
   Object.keys(providerMetadata).forEach(initializeProvider)
 
+  function stopRevalidationLoop(providerId: string) {
+    const loop = providerRevalidationLoops.get(providerId)
+    if (!loop)
+      return
+    loop.pause()
+    providerRevalidationLoops.delete(providerId)
+  }
+
+  function reconcileUnlistedProviders() {
+    for (const providerId of Object.keys(providerMetadata)) {
+      if (shouldListProvider(providerId))
+        continue
+      stopRevalidationLoop(providerId)
+      const runtimeState = providerRuntimeState.value[providerId]
+      if (!runtimeState)
+        continue
+      runtimeState.isConfigured = false
+      runtimeState.validatedCredentialHash = undefined
+    }
+  }
+
   function startPeriodicRuntimeValidation() {
     for (const [providerId, intervalMs] of providerValidationIntervalMsById.entries()) {
       if (!providerMetadata[providerId] || intervalMs <= 0)
+        continue
+
+      if (!shouldListProvider(providerId))
         continue
 
       if (providerRevalidationLoops.has(providerId)) {
@@ -2420,11 +2447,10 @@ export const useProvidersStore = defineStore('providers', () => {
     }
   }
 
-  // Update configuration status for all configured providers
+  // Update configuration status for listed providers only.
   async function updateConfigurationStatus() {
     await Promise.all(Object.entries(providerMetadata)
-      // TODO: ignore un-configured provider
-      // .filter(([_, provider]) => provider.configured)
+      .filter(([providerId]) => shouldListProvider(providerId) || providerId === 'browser-web-speech-api')
       .map(async ([providerId]) => {
         try {
           if (providerRuntimeState.value[providerId]) {
@@ -2440,11 +2466,16 @@ export const useProvidersStore = defineStore('providers', () => {
       }))
   }
 
-  // Call initially and watch for changes
-  watch(providerCredentials, updateConfigurationStatus, { deep: true, immediate: true })
-  startPeriodicRuntimeValidation()
+  async function refreshListedProviderValidation() {
+    reconcileUnlistedProviders()
+    await updateConfigurationStatus()
+    startPeriodicRuntimeValidation()
+  }
 
-  watch(() => authState.isAuthenticated, updateConfigurationStatus)
+  // Call initially and watch for changes
+  watch(providerCredentials, refreshListedProviderValidation, { deep: true, immediate: true })
+  watch(addedProviders, refreshListedProviderValidation, { deep: true })
+  watch(() => authState.isAuthenticated, refreshListedProviderValidation)
 
   // Available providers (only those that are properly configured)
   const availableProviders = computed(() => Object.keys(providerMetadata).filter(providerId => providerRuntimeState.value[providerId]?.isConfigured))
@@ -2506,7 +2537,9 @@ export const useProvidersStore = defineStore('providers', () => {
     providerRuntimeState.value = {}
 
     Object.keys(providerMetadata).forEach(initializeProvider)
-    await updateConfigurationStatus()
+    providerRevalidationLoops.forEach(loop => loop.pause())
+    providerRevalidationLoops.clear()
+    await refreshListedProviderValidation()
   }
 
   // Function to fetch models for a specific provider
@@ -2714,8 +2747,11 @@ export const useProvidersStore = defineStore('providers', () => {
       if (overrides[provider.id] === false)
         continue
 
-      const p = getProviderMetadata(provider.id)
-      const isAvailableBy = p.isAvailableBy || (() => true)
+      const metadata = getProviderMetadata(provider.id)
+      if (isCustomProvidersDisabled() && metadata.requiresCredentials !== false)
+        continue
+
+      const isAvailableBy = metadata.isAvailableBy || (() => true)
 
       const isAvailable = await isAvailableBy()
       if (isAvailable) {

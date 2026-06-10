@@ -1,6 +1,7 @@
 import type { OAuthProvider } from '@proj-airi/stage-ui/libs/auth'
 
 import { extractAuthError } from './auth-fetch'
+import { buildAuthUiPath } from './auth-ui-base'
 
 export interface ServerSignInContext {
   callbackURL: string
@@ -18,9 +19,12 @@ export function createServerSignInContext(currentUrl: string, apiServerUrl: stri
   const url = new URL(currentUrl)
   const oidcParams = new URLSearchParams(url.searchParams)
   const requestedProvider = oidcParams.get('provider')
+  const redirect = oidcParams.get('redirect')
 
   oidcParams.delete('provider')
+  oidcParams.delete('redirect')
   oidcParams.delete('prompt')
+  oidcParams.delete('api_server_url')
 
   // NOTICE:
   // Only synthesize an OIDC authorize callback when the page query genuinely
@@ -36,7 +40,7 @@ export function createServerSignInContext(currentUrl: string, apiServerUrl: stri
   // verification redirects can never land on /auth/sign-in carrying a `token`.
   if (!oidcParams.has('client_id') || !oidcParams.has('response_type')) {
     return {
-      callbackURL: '/',
+      callbackURL: normalizeStandaloneRedirect(url, redirect) ?? '/',
       requestedProvider,
     }
   }
@@ -48,6 +52,16 @@ export function createServerSignInContext(currentUrl: string, apiServerUrl: stri
     callbackURL: authorizeUrl.toString(),
     requestedProvider,
   }
+}
+
+function normalizeStandaloneRedirect(currentUrl: URL, redirect: string | null): string | null {
+  if (!redirect || !redirect.startsWith('/') || redirect.startsWith('//'))
+    return null
+
+  if (redirect.startsWith('/admin'))
+    return `${currentUrl.origin}${redirect}`
+
+  return `${currentUrl.origin}${buildAuthUiPath(redirect)}`
 }
 
 export async function requestSocialSignInRedirect(params: SocialSignInRedirectParams): Promise<string> {

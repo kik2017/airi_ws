@@ -1,11 +1,11 @@
 import type Redis from 'ioredis'
-import type { PostHog } from 'posthog-node'
 
 import type { Env } from '../../libs/env'
 import type { RateLimitMetrics, RevenueMetrics } from '../../otel'
 import type { ConfigKVService } from '../../services/adapters/config-kv'
 import type { BillingService } from '../../services/domain/billing/billing-service'
 import type { FluxService } from '../../services/domain/flux'
+import type { ProductEventService } from '../../services/domain/product-events'
 import type { StripeService } from '../../services/domain/stripe'
 import type { HonoEnv } from '../../types/hono'
 
@@ -46,11 +46,11 @@ export function createStripeRoutes(
   redis: Redis,
   metrics?: RevenueMetrics | null,
   rateLimitMetrics?: RateLimitMetrics | null,
-  posthog?: PostHog | null,
+  productEventService?: ProductEventService,
 ) {
   const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null
   const priceCatalog = stripe ? createStripePriceCatalog(stripe, redis) : null
-  const checkout = createCheckoutOperation({ stripe, priceCatalog, stripeService, configKV, env, metrics })
+  const checkout = createCheckoutOperation({ stripe, priceCatalog, stripeService, configKV, env, metrics, productEventService })
   const webhook = createWebhookOperation({
     stripe,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
@@ -58,7 +58,7 @@ export function createStripeRoutes(
     stripeService,
     billingService,
     metrics,
-    posthog,
+    productEventService,
   })
 
   return new Hono<HonoEnv>()
