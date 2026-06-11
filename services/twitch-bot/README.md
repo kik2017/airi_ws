@@ -67,8 +67,22 @@ For authenticated modes:
 
 ### Run
 
-Make sure an AIRI stage (Stage Web or Stage Tamagotchi) or server runtime is
-listening on `AIRI_URL` (defaults to `ws://localhost:6121/ws`), then:
+Make sure an AIRI server channel is listening on `AIRI_URL` (defaults to
+`ws://localhost:6121/ws`). Either:
+
+- **Stage Tamagotchi (desktop app)** — hosts the channel automatically.
+  Note that it generates an authentication token on first run: copy it into
+  `AIRI_TOKEN` in `.env.local`. You can find it in the app under
+  Settings → Connections, or in
+  `<Electron userData>/server-channel-config.json` (on Windows:
+  `%APPDATA%\@proj-airi\stage-tamagotchi\server-channel-config.json`).
+  Without it the bot logs `must authenticate before announcing` and keeps
+  retrying.
+- **Stage Web (browser)** — is only a channel *client*; additionally run the
+  standalone channel server: `pnpm -F @proj-airi/server-runtime start`
+  (no token required by default).
+
+Then:
 
 ```shell
 pnpm -F @proj-airi/twitch-bot start
