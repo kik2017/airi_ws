@@ -13,6 +13,7 @@ const log = useLogg('TwitchBot').useGlobalConfig()
 
 async function main() {
   const config = configFromEnv(env)
+  log.log(`Starting Twitch bot: channels ${config.channels.map(channel => `#${channel}`).join(', ')}, auth mode '${config.auth.mode}', AIRI hub ${config.airiUrl}`)
 
   const airiClient = new ServerChannel({
     name: 'twitch',
@@ -22,6 +23,16 @@ async function main() {
     ],
     token: config.airiToken,
     url: config.airiUrl,
+    // Surface connection progress: without these the SDK retries forever in
+    // silence when no AIRI hub is listening (e.g. stage-web running without
+    // a server channel), which looks like a hung process.
+    onError: error => log.withError(error).warn(`Cannot reach AIRI server channel at ${config.airiUrl}, retrying...`),
+    onStateChange: ({ previousStatus, status }) => {
+      if (status === 'failed')
+        log.error(`AIRI server channel connection failed permanently (was: ${previousStatus})`)
+      else if (status === 'ready')
+        log.log('AIRI server channel ready')
+    },
   })
 
   const chat = await TwitchChatClient.create({

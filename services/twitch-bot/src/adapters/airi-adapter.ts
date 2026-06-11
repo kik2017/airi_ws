@@ -64,7 +64,9 @@ export class TwitchAdapter {
 
     // Ensure the AIRI channel is ready before consuming chat, so early
     // messages are not silently dropped by send() while disconnected.
+    log.log('Waiting for AIRI server channel connection...')
     await this.airiClient.connect()
+    log.log('Connecting to Twitch chat...')
     await this.chat.connect()
 
     log.log('Twitch adapter started')
