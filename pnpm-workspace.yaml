@@ -170,6 +170,8 @@ catalog:
   '@tresjs/cientos': ^5.7.0
   '@tresjs/core': ^5.8.0
   '@tresjs/post-processing': ^3.7.1
+  '@twurple/auth': ^8.1.4
+  '@twurple/chat': ^8.1.4
   '@types/audioworklet': ^0.0.97
   '@types/culori': ^4.0.1
   '@types/d3': ^7.4.3
