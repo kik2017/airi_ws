@@ -59,6 +59,7 @@ import { useAuthStore } from './auth'
 import { createAliyunNLSProvider as createAliyunNlsStreamProvider } from './providers/aliyun/stream-transcription'
 import { convertProviderDefinitionsToMetadata } from './providers/converters'
 import { models as elevenLabsModels } from './providers/elevenlabs/list-models'
+import { buildGoogleGeminiSpeechProvider } from './providers/google-gemini-speech'
 import { buildOpenAICompatibleProvider } from './providers/openai-compatible-builder'
 import { buildOpenRouterAudioSpeechProvider } from './providers/openrouter/audio-speech'
 import { createWebSpeechAPIProvider } from './providers/web-speech-api'
@@ -81,8 +82,9 @@ function toListVoicesOptions<T>(provider: VoiceProviderWithExtraOptions<T>, opti
 
 export interface ProviderMetadata {
   id: string
+  to?: string
   order?: number
-  category: 'chat' | 'embed' | 'speech' | 'transcription'
+  category: 'chat' | 'embed' | 'speech' | 'transcription' | 'vision'
   tasks: string[]
   nameKey: string // i18n key for provider name
   name: string // Default name (fallback)
@@ -2238,6 +2240,19 @@ export const useProvidersStore = defineStore('providers', () => {
         },
       },
     },
+    'google-gemini-audio-speech': buildGoogleGeminiSpeechProvider(v => baseUrlValidator.value(v)),
+  }
+
+  const VISION_PROVIDER_ID_PREFIX = 'vision-'
+
+  function createVisionProviderMetadata(metadata: ProviderMetadata): ProviderMetadata {
+    return {
+      ...metadata,
+      id: `${VISION_PROVIDER_ID_PREFIX}${metadata.id}`,
+      to: `/settings/providers/vision/${metadata.id}`,
+      category: 'vision',
+      tasks: Array.from(new Set([...metadata.tasks, 'vision', 'image-understanding'])),
+    }
   }
 
   // Progressive migration bridge:
@@ -2260,6 +2275,7 @@ export const useProvidersStore = defineStore('providers', () => {
     })
     if (intervalMs && intervalMs > 0) {
       providerValidationIntervalMsById.set(definition.id, intervalMs)
+      providerValidationIntervalMsById.set(`${VISION_PROVIDER_ID_PREFIX}${definition.id}`, intervalMs)
     }
   }
 
@@ -2271,6 +2287,12 @@ export const useProvidersStore = defineStore('providers', () => {
   // and remove the hand-written metadata above entirely.
   for (const [providerId, translated] of Object.entries(translatedProviderMetadata)) {
     providerMetadata[providerId] = translated
+  }
+
+  for (const metadata of Object.values(providerMetadata)
+    .filter(metadata => metadata.category === 'chat')
+    .map(createVisionProviderMetadata)) {
+    providerMetadata[metadata.id] = metadata
   }
 
   for (const metadata of Object.values(providerMetadata)) {
@@ -2774,6 +2796,10 @@ export const useProvidersStore = defineStore('providers', () => {
     return availableProvidersMetadata.value.filter(metadata => metadata.category === 'transcription')
   })
 
+  const allVisionProvidersMetadata = computed(() => {
+    return availableProvidersMetadata.value.filter(metadata => metadata.category === 'vision')
+  })
+
   const configuredChatProvidersMetadata = computed(() => {
     return allChatProvidersMetadata.value.filter(metadata => configuredProviders.value[metadata.id])
   })
@@ -2784,6 +2810,10 @@ export const useProvidersStore = defineStore('providers', () => {
 
   const configuredTranscriptionProvidersMetadata = computed(() => {
     return allAudioTranscriptionProvidersMetadata.value.filter(metadata => configuredProviders.value[metadata.id])
+  })
+
+  const configuredVisionProvidersMetadata = computed(() => {
+    return allVisionProvidersMetadata.value.filter(metadata => configuredProviders.value[metadata.id])
   })
 
   function isProviderConfigDirty(providerId: string) {
@@ -2813,6 +2843,10 @@ export const useProvidersStore = defineStore('providers', () => {
 
   const persistedTranscriptionProvidersMetadata = computed(() => {
     return persistedProvidersMetadata.value.filter(metadata => metadata.category === 'transcription')
+  })
+
+  const persistedVisionProvidersMetadata = computed(() => {
+    return persistedProvidersMetadata.value.filter(metadata => metadata.category === 'vision')
   })
 
   function getProviderConfig(providerId: string) {
@@ -2852,12 +2886,15 @@ export const useProvidersStore = defineStore('providers', () => {
     allChatProvidersMetadata,
     allAudioSpeechProvidersMetadata,
     allAudioTranscriptionProvidersMetadata,
+    allVisionProvidersMetadata,
     configuredChatProvidersMetadata,
     configuredSpeechProvidersMetadata,
     configuredTranscriptionProvidersMetadata,
+    configuredVisionProvidersMetadata,
     persistedProvidersMetadata,
     persistedChatProvidersMetadata,
     persistedSpeechProvidersMetadata,
     persistedTranscriptionProvidersMetadata,
+    persistedVisionProvidersMetadata,
   }
 })

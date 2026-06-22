@@ -5,6 +5,7 @@ import { Button, FieldInput, FieldSelect, FieldTextArea } from '@proj-airi/ui'
 import { computed } from 'vue'
 
 import {
+  ALIYUN_NLS_REGION_OPTIONS,
   DASHSCOPE_REGION_OPTIONS,
   STEPFUN_MODEL_OPTIONS,
 } from '../../modules/router-config-form'
@@ -30,6 +31,8 @@ const title = computed(() => {
       return 'DashScope CosyVoice'
     case 'stepfun':
       return 'StepFun TTS'
+    case 'aliyun-nls-asr':
+      return 'Aliyun NLS ASR'
     case 'unspeech':
       return 'UnSpeech'
     default:
@@ -69,13 +72,13 @@ const streamingKeyPlaceholder = computed(() => {
 </script>
 
 <template>
-  <section :class="['rounded-lg', 'border', 'border-neutral-200', 'bg-white', 'p-4']">
+  <section :class="['rounded-lg', 'border', 'border-neutral-200', 'bg-white', 'p-4', 'dark:border-neutral-800', 'dark:bg-neutral-900']">
     <div :class="['mb-4', 'flex', 'flex-col', 'gap-3', 'md:flex-row', 'md:items-start', 'md:justify-between']">
       <div :class="['min-w-0']">
         <h3 :class="['truncate', 'text-sm', 'font-semibold']">
           {{ index }}. {{ title }}
         </h3>
-        <p :class="['mt-1', 'text-xs', 'text-neutral-500']">
+        <p :class="['mt-1', 'text-xs', 'text-neutral-500', 'dark:text-neutral-400']">
           {{ slice.kind }}
         </p>
       </div>
@@ -119,14 +122,23 @@ const streamingKeyPlaceholder = computed(() => {
       <FieldInput v-model="slice.keyEntryId" input-class="font-mono text-xs" label="Key entry ID" placeholder="stepfun-tts-prod-1" />
     </div>
 
-    <div v-else :class="['space-y-4']">
+    <div v-else-if="slice.kind === 'aliyun-nls-asr'" :class="['grid', 'gap-4', 'md:grid-cols-2']">
+      <FieldInput v-model="slice.modelName" input-class="font-mono text-xs" label="Model alias" placeholder="auto" required />
+      <FieldInput v-model="slice.accessKeyId" autocomplete="username" input-class="font-mono text-xs" label="Access key ID" placeholder="LTAI..." required />
+      <FieldInput v-model="slice.appKey" input-class="font-mono text-xs" label="App key" placeholder="nls app key" required />
+      <FieldSelect v-model="slice.region" label="Region" layout="vertical" :options="ALIYUN_NLS_REGION_OPTIONS" select-class="w-full" />
+      <FieldInput v-model="slice.plaintextKey" autocomplete="new-password" :description="providerKeyDescription" input-class="font-mono text-xs" label="Access key secret" :placeholder="providerKeyPlaceholder" required type="password" />
+      <FieldInput v-model="slice.keyEntryId" input-class="font-mono text-xs" label="Key entry ID" placeholder="aliyun-nls-asr-prod-1" />
+    </div>
+
+    <div v-else-if="slice.kind === 'unspeech'" :class="['space-y-4']">
       <FieldInput v-model="slice.restBaseURL" input-class="font-mono text-xs" label="REST base URL" placeholder="http://airi-unspeech.railway.internal:5933" required />
 
-      <label :class="['flex', 'items-start', 'gap-3', 'rounded-lg', 'border', 'border-neutral-200', 'bg-neutral-50', 'p-3']">
+      <label :class="['flex', 'items-start', 'gap-3', 'rounded-lg', 'border', 'border-neutral-200', 'bg-neutral-50', 'p-3', 'dark:border-neutral-800', 'dark:bg-neutral-950']">
         <input v-model="slice.streamingEnabled" :class="['mt-1']" type="checkbox">
         <span>
           <span :class="['block', 'text-sm', 'font-medium']">Enable streaming upstream</span>
-          <span :class="['block', 'text-xs', 'text-neutral-500']">Writes UNSPEECH_UPSTREAM.streaming for WebSocket TTS.</span>
+          <span :class="['block', 'text-xs', 'text-neutral-500', 'dark:text-neutral-400']">Writes UNSPEECH_UPSTREAM.streaming for WebSocket TTS.</span>
         </span>
       </label>
 

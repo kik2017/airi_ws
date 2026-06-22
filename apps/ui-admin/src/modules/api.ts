@@ -102,11 +102,23 @@ export interface AdminRouterUnspeechSlice {
   }
 }
 
+export interface AdminRouterAliyunNlsAsrSlice {
+  kind: 'aliyun-nls-asr'
+  modelName: string
+  accessKeyId: string
+  appKey: string
+  region?: 'cn-shanghai' | 'cn-shanghai-internal' | 'cn-beijing' | 'cn-beijing-internal' | 'cn-shenzhen' | 'cn-shenzhen-internal'
+  plaintextKey?: string
+  keyEntryId?: string
+  existingKeyEntryId?: string
+}
+
 export type AdminRouterConfigSlice
   = | AdminRouterOpenRouterSlice
     | AdminRouterAzureSlice
     | AdminRouterDashscopeSlice
     | AdminRouterStepfunSlice
+    | AdminRouterAliyunNlsAsrSlice
     | AdminRouterUnspeechSlice
 
 export interface AdminRouterConfigRequest {
@@ -209,10 +221,27 @@ export function apiServerUrl(): string {
   return getServerAdminBootstrapContext()?.apiServerUrl ?? defaultApiServerUrl()
 }
 
-export function signInUrl(): string {
-  const url = new URL('/auth/sign-in', apiServerUrl())
-  url.searchParams.set('redirect', `${window.location.pathname}${window.location.search}`)
+/**
+ * Builds an API-owned sign-in URL that returns to the exact admin page.
+ *
+ * Use when:
+ * - The standalone admin app needs to bounce through the API auth route.
+ * - The admin app may be hosted on a different origin than the auth UI.
+ *
+ * Expects:
+ * - `currentUrl` is the browser's absolute admin URL.
+ *
+ * Returns:
+ * - An API `/auth/sign-in` URL carrying an absolute trusted return target.
+ */
+export function buildAdminSignInUrl(apiServerUrl: string, currentUrl: string): string {
+  const url = new URL('/auth/sign-in', apiServerUrl)
+  url.searchParams.set('redirect', currentUrl)
   return url.toString()
+}
+
+export function signInUrl(): string {
+  return buildAdminSignInUrl(apiServerUrl(), window.location.href)
 }
 
 async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
