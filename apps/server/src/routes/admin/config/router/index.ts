@@ -32,16 +32,38 @@ import { createBadRequestError } from '../../../../utils/error'
 const MAX_SLICES_PER_REQUEST = 20
 
 /**
- * Hard cap on plaintext key length. Real provider keys are 30–200 chars;
- * 1KB leaves headroom for unusual formats while keeping the body lean.
+ * Hard cap on plaintext key length. Most provider keys are short, but
+ * Bedrock bearer tokens can be multi-kilobyte signed payloads.
  */
-const MAX_KEY_LENGTH = 1024
+const MAX_KEY_LENGTH = 8192
 
 /** AAD separator constraint mirrored from `keyEntrySchema` in config-kv. */
 const NO_PIPE = regex(/^[^|]+$/, 'must not contain "|" (reserved AAD separator)')
 
 const OpenRouterSliceSchema = object({
   kind: literal('openrouter'),
+  modelName: pipe(string(), nonEmpty('modelName is required'), maxLength(200), NO_PIPE),
+  overrideModel: pipe(string(), nonEmpty('overrideModel is required'), maxLength(200)),
+  plaintextKey: optional(pipe(string(), nonEmpty('plaintextKey must not be empty when provided'), maxLength(MAX_KEY_LENGTH))),
+  baseURL: optional(pipe(string(), url('baseURL must be a valid URL'))),
+  keyEntryId: optional(pipe(string(), nonEmpty(), maxLength(200), NO_PIPE)),
+  existingKeyEntryId: optional(pipe(string(), nonEmpty(), maxLength(200), NO_PIPE)),
+  headerTemplate: optional(pipe(string(), nonEmpty(), maxLength(200))),
+})
+
+const BedrockSliceSchema = object({
+  kind: literal('bedrock'),
+  modelName: pipe(string(), nonEmpty('modelName is required'), maxLength(200), NO_PIPE),
+  overrideModel: pipe(string(), nonEmpty('overrideModel is required'), maxLength(200)),
+  plaintextKey: optional(pipe(string(), nonEmpty('plaintextKey must not be empty when provided'), maxLength(MAX_KEY_LENGTH))),
+  baseURL: optional(pipe(string(), url('baseURL must be a valid URL'))),
+  keyEntryId: optional(pipe(string(), nonEmpty(), maxLength(200), NO_PIPE)),
+  existingKeyEntryId: optional(pipe(string(), nonEmpty(), maxLength(200), NO_PIPE)),
+  headerTemplate: optional(pipe(string(), nonEmpty(), maxLength(200))),
+})
+
+const OpenAICompatibleSliceSchema = object({
+  kind: literal('openai-compatible'),
   modelName: pipe(string(), nonEmpty('modelName is required'), maxLength(200), NO_PIPE),
   overrideModel: pipe(string(), nonEmpty('overrideModel is required'), maxLength(200)),
   plaintextKey: optional(pipe(string(), nonEmpty('plaintextKey must not be empty when provided'), maxLength(MAX_KEY_LENGTH))),
@@ -82,6 +104,24 @@ const StepfunSliceSchema = object({
   existingKeyEntryId: optional(pipe(string(), nonEmpty(), maxLength(200), NO_PIPE)),
 })
 
+const AliyunNlsAsrSliceSchema = object({
+  kind: literal('aliyun-nls-asr'),
+  modelName: pipe(string(), nonEmpty('modelName is required'), maxLength(200), NO_PIPE),
+  accessKeyId: pipe(string(), nonEmpty('accessKeyId is required'), maxLength(200)),
+  appKey: pipe(string(), nonEmpty('appKey is required'), maxLength(200)),
+  region: optional(picklist([
+    'cn-shanghai',
+    'cn-shanghai-internal',
+    'cn-beijing',
+    'cn-beijing-internal',
+    'cn-shenzhen',
+    'cn-shenzhen-internal',
+  ], 'region must be a supported Aliyun NLS region')),
+  plaintextKey: optional(pipe(string(), nonEmpty('plaintextKey must not be empty when provided'), maxLength(MAX_KEY_LENGTH))),
+  keyEntryId: optional(pipe(string(), nonEmpty(), maxLength(200), NO_PIPE)),
+  existingKeyEntryId: optional(pipe(string(), nonEmpty(), maxLength(200), NO_PIPE)),
+})
+
 /**
  * `restBaseURL` is the unspeech REST root (http(s)://host:port, no path).
  * `streaming.upstreamURL` must be ws:// or wss:// — http(s):// here is almost
@@ -117,9 +157,12 @@ const UnspeechSliceSchema = object({
 
 const SliceSchema = variant('kind', [
   OpenRouterSliceSchema,
+  BedrockSliceSchema,
+  OpenAICompatibleSliceSchema,
   AzureSliceSchema,
   DashscopeSliceSchema,
   StepfunSliceSchema,
+  AliyunNlsAsrSliceSchema,
   UnspeechSliceSchema,
 ])
 
@@ -161,6 +204,12 @@ const BodySchema = object({
  *     "slices": [                      // optional when only defaults change
  *       { "kind": "openrouter", "modelName": "chat-default",
  *         "overrideModel": "openai/gpt-4o-mini", "plaintextKey": "..." },
+ *       { "kind": "bedrock", "modelName": "chat-bedrock",
+ *         "overrideModel": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+ *         "plaintextKey": "...", "baseURL": "https://bedrock-mantle.us-east-1.api.aws/v1" },
+ *       { "kind": "openai-compatible", "modelName": "chat-compatible",
+ *         "overrideModel": "gpt-4o-mini", "plaintextKey": "...",
+ *         "baseURL": "https://api.example.com/v1" },
  *       { "kind": "azure", "modelName": "microsoft/v1",
  *         "region": "eastasia", "plaintextKey": "..." },
  *       { "kind": "dashscope-cosyvoice", "modelName": "alibaba/cosyvoice-v2",
@@ -169,6 +218,8 @@ const BodySchema = object({
  *       { "kind": "stepfun", "modelName": "stepfun/stepaudio-2.5-tts",
  *         "upstreamModel": "stepaudio-2.5-tts",
  *         "defaultVoice": "cixingnansheng", "plaintextKey": "..." },
+ *       { "kind": "aliyun-nls-asr", "modelName": "auto",
+ *         "accessKeyId": "...", "appKey": "...", "plaintextKey": "..." },
  *       { "kind": "unspeech",
  *         "restBaseURL": "http://airi-unspeech.railway.internal:5933",
  *         "streaming": {

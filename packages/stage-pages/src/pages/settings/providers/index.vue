@@ -50,9 +50,10 @@ const {
   allChatProvidersMetadata,
   allAudioSpeechProvidersMetadata,
   allAudioTranscriptionProvidersMetadata,
+  allVisionProvidersMetadata,
 } = storeToRefs(providersStore)
 
-const allArtistryProvidersMetadata = computed<ProviderSourceCard[]>(() => {
+const allArtistryProvidersMetadata = computed<ProviderSourceCard[]>((): ProviderSourceCard[] => {
   return [
     {
       id: 'comfyui',
@@ -72,7 +73,7 @@ const allArtistryProvidersMetadata = computed<ProviderSourceCard[]>(() => {
     },
     ...(isCustomProvidersDisabled()
       ? []
-      : [
+      : ([
           {
             id: 'replicate',
             category: 'artistry',
@@ -103,7 +104,7 @@ const allArtistryProvidersMetadata = computed<ProviderSourceCard[]>(() => {
             deployment: 'cloud',
             iconImage: undefined,
           },
-        ]),
+        ] satisfies ProviderSourceCard[])),
   ]
 })
 
@@ -114,6 +115,13 @@ const providerBlocksConfig: ProviderBlockConfig[] = [
     title: t('settings.pages.providers.categories.chat.title'),
     description: t('settings.pages.providers.categories.chat.description'),
     providersRef: allChatProvidersMetadata,
+  },
+  {
+    id: 'vision',
+    icon: 'i-solar:eye-bold-duotone',
+    title: t('settings.pages.providers.categories.vision.title'),
+    description: t('settings.pages.providers.categories.vision.description'),
+    providersRef: allVisionProvidersMetadata,
   },
   {
     id: 'speech',
@@ -165,6 +173,8 @@ const providerBlocks = computed(() => {
     .map((block) => {
       const filteredProviders = block.providersRef.value
         .filter((p) => {
+          if (p.id === 'speech-noop')
+            return false
           if (filterPricing.value !== 'all' && p.pricing !== filterPricing.value)
             return false
           if (filterDeployment.value !== 'all' && p.deployment !== filterDeployment.value)

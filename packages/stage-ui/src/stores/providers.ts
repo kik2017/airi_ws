@@ -24,7 +24,7 @@ import type { ProviderOnboardingField } from '../libs/providers/types'
 import type { AliyunRealtimeSpeechExtraOptions } from './providers/aliyun/stream-transcription'
 
 import { errorMessageFrom } from '@moeru/std'
-import { isCustomProvidersDisabled, isStageTamagotchi, isUrl } from '@proj-airi/stage-shared'
+import { isCustomProvidersDisabled, isStageCapacitor, isStageTamagotchi, isUrl } from '@proj-airi/stage-shared'
 import { getCachedWebGPUCapabilities, isWebGPUSupported } from '@proj-airi/stage-shared/webgpu'
 import { computedAsync, useIntervalFn, useLocalStorage } from '@vueuse/core'
 import {
@@ -55,13 +55,16 @@ import { getKokoroAdapter } from '../libs/inference/adapters/kokoro'
 import { getProviderValidationIntervalMs, listProviders as listDefinedProviders, ProviderValidationCheck } from '../libs/providers'
 import { resolveProviderSourceMetadata } from '../libs/providers/source-metadata'
 import { getDefaultKokoroModel, KOKORO_MODELS, kokoroModelsToModelInfo } from '../workers/kokoro/constants'
+import { capturePosthogEvent, ensurePosthogInitialized, isPosthogAvailableInBuild } from './analytics/posthog'
 import { useAuthStore } from './auth'
 import { createAliyunNLSProvider as createAliyunNlsStreamProvider } from './providers/aliyun/stream-transcription'
 import { convertProviderDefinitionsToMetadata } from './providers/converters'
 import { models as elevenLabsModels } from './providers/elevenlabs/list-models'
+import { buildGoogleGeminiSpeechProvider } from './providers/google-gemini-speech'
 import { buildOpenAICompatibleProvider } from './providers/openai-compatible-builder'
 import { buildOpenRouterAudioSpeechProvider } from './providers/openrouter/audio-speech'
 import { createWebSpeechAPIProvider } from './providers/web-speech-api'
+import { useSettingsAnalytics } from './settings/analytics'
 
 const ALIYUN_NLS_REGIONS = [
   'cn-shanghai',
@@ -79,10 +82,83 @@ function toListVoicesOptions<T>(provider: VoiceProviderWithExtraOptions<T>, opti
   return voiceOptions
 }
 
+/**
+ * Classifies provider ids into bounded analytics buckets.
+ */
+function analyticsProviderMode(providerId: string): 'official' | 'custom' | 'unknown' {
+  if (!providerId)
+    return 'unknown'
+  return providerId.startsWith('official-provider') || providerId.startsWith('vision-official-provider') ? 'official' : 'custom'
+}
+
+/**
+ * Resolves the current app surface without importing the analytics store.
+ */
+function analyticsSurface(): 'web' | 'mobile' | 'electron' {
+  if (isStageTamagotchi())
+    return 'electron'
+
+  if (isStageCapacitor())
+    return 'mobile'
+
+  return 'web'
+}
+
+/**
+ * Checks analytics settings and initializes PostHog without loading build metadata.
+ */
+function canCaptureProviderAnalytics(): boolean {
+  if (!isPosthogAvailableInBuild())
+    return false
+
+  const settingsAnalytics = useSettingsAnalytics()
+  if (!settingsAnalytics.analyticsEnabled)
+    return false
+
+  return ensurePosthogInitialized(true)
+}
+
+/**
+ * Emits model-list analytics from the provider store without loading build metadata.
+ */
+function trackModelListLoaded(properties: {
+  provider_id: string
+  provider_mode: 'official' | 'custom' | 'unknown'
+  model_count: number
+  duration_ms: number
+}) {
+  if (!canCaptureProviderAnalytics())
+    return
+
+  capturePosthogEvent('model_list_loaded', {
+    ...properties,
+    surface: analyticsSurface(),
+  })
+}
+
+/**
+ * Emits model-list failure analytics from the provider store without loading build metadata.
+ */
+function trackModelListFailed(properties: {
+  provider_id: string
+  provider_mode: 'official' | 'custom' | 'unknown'
+  error_code: string
+  duration_ms: number
+}) {
+  if (!canCaptureProviderAnalytics())
+    return
+
+  capturePosthogEvent('model_list_failed', {
+    ...properties,
+    surface: analyticsSurface(),
+  })
+}
+
 export interface ProviderMetadata {
   id: string
+  to?: string
   order?: number
-  category: 'chat' | 'embed' | 'speech' | 'transcription'
+  category: 'chat' | 'embed' | 'speech' | 'transcription' | 'vision'
   tasks: string[]
   nameKey: string // i18n key for provider name
   name: string // Default name (fallback)
@@ -2238,6 +2314,19 @@ export const useProvidersStore = defineStore('providers', () => {
         },
       },
     },
+    'google-gemini-audio-speech': buildGoogleGeminiSpeechProvider(v => baseUrlValidator.value(v)),
+  }
+
+  const VISION_PROVIDER_ID_PREFIX = 'vision-'
+
+  function createVisionProviderMetadata(metadata: ProviderMetadata): ProviderMetadata {
+    return {
+      ...metadata,
+      id: `${VISION_PROVIDER_ID_PREFIX}${metadata.id}`,
+      to: `/settings/providers/vision/${metadata.id}`,
+      category: 'vision',
+      tasks: Array.from(new Set([...metadata.tasks, 'vision', 'image-understanding'])),
+    }
   }
 
   // Progressive migration bridge:
@@ -2260,6 +2349,7 @@ export const useProvidersStore = defineStore('providers', () => {
     })
     if (intervalMs && intervalMs > 0) {
       providerValidationIntervalMsById.set(definition.id, intervalMs)
+      providerValidationIntervalMsById.set(`${VISION_PROVIDER_ID_PREFIX}${definition.id}`, intervalMs)
     }
   }
 
@@ -2271,6 +2361,12 @@ export const useProvidersStore = defineStore('providers', () => {
   // and remove the hand-written metadata above entirely.
   for (const [providerId, translated] of Object.entries(translatedProviderMetadata)) {
     providerMetadata[providerId] = translated
+  }
+
+  for (const metadata of Object.values(providerMetadata)
+    .filter(metadata => metadata.category === 'chat')
+    .map(createVisionProviderMetadata)) {
+    providerMetadata[metadata.id] = metadata
   }
 
   for (const metadata of Object.values(providerMetadata)) {
@@ -2544,6 +2640,7 @@ export const useProvidersStore = defineStore('providers', () => {
 
   // Function to fetch models for a specific provider
   async function fetchModelsForProvider(providerId: string) {
+    const startedAt = Date.now()
     const metadata = providerMetadata[providerId]
     if (!metadata)
       return []
@@ -2572,8 +2669,20 @@ export const useProvidersStore = defineStore('providers', () => {
             deprecated: model.deprecated,
             provider: providerId,
           }))
+        trackModelListLoaded({
+          provider_id: providerId,
+          provider_mode: analyticsProviderMode(providerId),
+          model_count: runtimeState.models.length,
+          duration_ms: Date.now() - startedAt,
+        })
         return runtimeState.models
       }
+      trackModelListLoaded({
+        provider_id: providerId,
+        provider_mode: analyticsProviderMode(providerId),
+        model_count: 0,
+        duration_ms: Date.now() - startedAt,
+      })
       return []
     }
     catch (error) {
@@ -2581,6 +2690,12 @@ export const useProvidersStore = defineStore('providers', () => {
       if (runtimeState) {
         runtimeState.modelLoadError = errorMessageFrom(error) ?? 'Unknown error'
       }
+      trackModelListFailed({
+        provider_id: providerId,
+        provider_mode: analyticsProviderMode(providerId),
+        error_code: 'provider_error',
+        duration_ms: Date.now() - startedAt,
+      })
       return []
     }
     finally {
@@ -2774,6 +2889,10 @@ export const useProvidersStore = defineStore('providers', () => {
     return availableProvidersMetadata.value.filter(metadata => metadata.category === 'transcription')
   })
 
+  const allVisionProvidersMetadata = computed(() => {
+    return availableProvidersMetadata.value.filter(metadata => metadata.category === 'vision')
+  })
+
   const configuredChatProvidersMetadata = computed(() => {
     return allChatProvidersMetadata.value.filter(metadata => configuredProviders.value[metadata.id])
   })
@@ -2784,6 +2903,10 @@ export const useProvidersStore = defineStore('providers', () => {
 
   const configuredTranscriptionProvidersMetadata = computed(() => {
     return allAudioTranscriptionProvidersMetadata.value.filter(metadata => configuredProviders.value[metadata.id])
+  })
+
+  const configuredVisionProvidersMetadata = computed(() => {
+    return allVisionProvidersMetadata.value.filter(metadata => configuredProviders.value[metadata.id])
   })
 
   function isProviderConfigDirty(providerId: string) {
@@ -2813,6 +2936,10 @@ export const useProvidersStore = defineStore('providers', () => {
 
   const persistedTranscriptionProvidersMetadata = computed(() => {
     return persistedProvidersMetadata.value.filter(metadata => metadata.category === 'transcription')
+  })
+
+  const persistedVisionProvidersMetadata = computed(() => {
+    return persistedProvidersMetadata.value.filter(metadata => metadata.category === 'vision')
   })
 
   function getProviderConfig(providerId: string) {
@@ -2852,12 +2979,15 @@ export const useProvidersStore = defineStore('providers', () => {
     allChatProvidersMetadata,
     allAudioSpeechProvidersMetadata,
     allAudioTranscriptionProvidersMetadata,
+    allVisionProvidersMetadata,
     configuredChatProvidersMetadata,
     configuredSpeechProvidersMetadata,
     configuredTranscriptionProvidersMetadata,
+    configuredVisionProvidersMetadata,
     persistedProvidersMetadata,
     persistedChatProvidersMetadata,
     persistedSpeechProvidersMetadata,
     persistedTranscriptionProvidersMetadata,
+    persistedVisionProvidersMetadata,
   }
 })
